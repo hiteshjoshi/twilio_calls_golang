@@ -28,7 +28,7 @@ type TwiML struct {
   XMLName xml.Name `xml:"Response"`
 
   Say    string `xml:",omitempty"`
-  Play   string `xml:",omitempty"`
+  Play   string `xml:"Play,omitempty"`
   Record   Record `xml:",omitempty"`
   Hangup  string `xml:"Hangup"`
 }
@@ -99,7 +99,7 @@ func main() {
 			panic(err)
 		}
 
-    	twiml := TwiML{Play:call.RecordingUrl+".mp3"}
+    	twiml := TwiML{Say:"Your Care To Call reminder is here.",Play:call.RecordingUrl+".mp3"}
         c.XML(200, twiml)
     })
 
@@ -130,7 +130,7 @@ func main() {
     	number:=c.PostForm("number")
     	reminder:=c.PostForm("reminder")
 
-
+    	fmt.Println(reminder,number)
     	// Let's set some initial default variables
 		accountSid := os.Getenv("ACCOUNT_SID")
 		authToken := os.Getenv("AUTH_TOKEN")
