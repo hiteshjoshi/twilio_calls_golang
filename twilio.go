@@ -29,7 +29,7 @@ type TwiML struct {
 
   Say    string `xml:",omitempty"`
   Play   string `xml:",omitempty"`
-  Record   Record `xml:"Record,omitempty"`
+  Record   Record `xml:",omitempty"`
   Hangup  string `xml:"Hangup"`
 }
 
@@ -43,6 +43,7 @@ type (
 		Pending    bool           `json:"pending" bson:"pending"`
 		CallSid   string        `json:"call_sid" bson:"call_sid"`
 		RecordingUrl  string `json:"recording_url" bson:"recording_url"`
+		Reminder  string `json:"reminder" bson:"reminder"`
 	}
 
 	//CallController represents the controller for operating on the User resource
@@ -60,7 +61,7 @@ func main() {
 	defer session.Close()
 	// Index
 	index := mgo.Index{
-		Key:        []string{"call_sid","id"},
+		Key:        []string{"call_sid","id","reminder"},
 		Unique:     true,
 		DropDups:   true,
 		Background: true,
@@ -89,10 +90,24 @@ func main() {
     })
 
 
+    router.POST("/play_recording/:reminder", func (c *gin.Context) {
+    	reminder:=c.Param("reminder")
+    	controller:=NewController(session)
+
+    	call,err := controller.FindByReminderId(reminder)
+    	if err!=nil{
+			panic(err)
+		}
+
+    	twiml := TwiML{Play:call.RecordingUrl+".mp3"}
+        c.XML(200, twiml)
+    })
+
+
     //handle_recording, mp3 file etc
     router.GET("/handle_recording", func (c *gin.Context){
     	
-		controller:=NewController(getSession())
+		controller:=NewController(session)
 
 		doc,err:=controller.Find(c.Query("CallSid"))
 
@@ -110,15 +125,68 @@ func main() {
     	c.XML(200,gin.H{})
     })
 
+
+    router.POST("/call_user", func (c *gin.Context) {
+    	number:=c.PostForm("number")
+    	reminder:=c.PostForm("reminder")
+
+
+    	// Let's set some initial default variables
+		accountSid := os.Getenv("ACCOUNT_SID")
+		authToken := os.Getenv("AUTH_TOKEN")
+		urlStr := "https://api.twilio.com/2010-04-01/Accounts/" + accountSid + "/Calls.json"
+
+		// Build out the data for our message
+		v := url.Values{}
+		v.Set("To",number)
+		v.Set("From",os.Getenv("PHONE_NUMBER"))
+		v.Set("Url","http://record.livetest.io/play_recording/"+reminder)
+		rb := *strings.NewReader(v.Encode())
+
+		// Create Client
+		client := &http.Client{}
+
+		req, _ := http.NewRequest("POST", urlStr, &rb)
+		req.SetBasicAuth(accountSid, authToken)
+		req.Header.Add("Accept", "application/json")
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+		// make request
+		resp, _ := client.Do(req)
+		if( resp.StatusCode >= 200 && resp.StatusCode < 300 ) {
+			var data map[string]interface{}
+			bodyBytes, _ := ioutil.ReadAll(resp.Body)
+			err := json.Unmarshal(bodyBytes, &data)
+
+			if( err == nil ) {
+				//newcall.CallSid = data["sid"].(string)
+
+				//controller.Save(newcall)
+
+				fmt.Println(data["sid"])
+			}
+		} else {
+			
+			fmt.Println(resp.Status);
+			c.JSON(400, gin.H{
+	            "all": "ok",
+	        })
+		}
+
+
+	})
+
+
     router.POST("/call", func (c *gin.Context) {
 
     	number:=c.PostForm("number")
+    	reminder:=c.PostForm("reminder")
 
 
     	controller:=NewController(session)
 
 
-    	newcall:= Call{Id:bson.NewObjectId(),Number:number,Time:time.Now(),Pending:true}
+    	newcall:= Call{Reminder:reminder,Id:bson.NewObjectId(),Number:number,Time:time.Now(),Pending:true}
 
     	// Let's set some initial default variables
 		accountSid := os.Getenv("ACCOUNT_SID")
@@ -190,6 +258,15 @@ func (cc CallController) Save(call Call){
 	}
 }
 
+
+func (cc CallController) FindByReminderId(reminder string) (Call,error){
+	result := Call{}
+	err := cc.session.DB("c100").C("recordings").Find(bson.M{"reminder": reminder}).One(&result)
+	if err != nil {
+		panic(err)
+	}
+	return result,err;
+}
 
 func (cc CallController) Find(CallSid string) (Call,error) {
 	
